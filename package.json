@@ -1,0 +1,53 @@
+{
+    "name": "video-calling-app",
+    "version": "1.0.0",
+    "description": "Full-featured video calling app with React, WebRTC, and Socket.io",
+    "main": "server.js",
+    "scripts": {
+        "dev": "concurrently \"npm run server\" \"npm run client\"",
+        "server": "nodemon server.js",
+        "client": "react-scripts start",
+        "build": "react-scripts build",
+        "test": "react-scripts test",
+        "eject": "react-scripts eject"
+    },
+    "keywords": [
+        "webrtc",
+        "video-call",
+        "socket.io",
+        "react"
+    ],
+    "author": "Your Name",
+    "license": "MIT",
+    "dependencies": {
+        "@heroicons/react": "^2.2.0",
+        "framer-motion": "^12.23.12",
+        "lucide-react": "^0.263.1",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-icons": "^5.5.0",
+        "react-router-dom": "^7.7.1",
+        "react-scripts": "5.0.1",
+        "socket.io-client": "^4.7.2",
+        "tailwindcss": "^4.1.11"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.0",
+        "cors": "^2.8.5",
+        "express": "^4.18.2",
+        "nodemon": "^3.0.1",
+        "socket.io": "^4.7.2"
+    },
+    "browserslist": {
+        "production": [
+            ">0.2%",
+            "not dead",
+            "not op_mini all"
+        ],
+        "development": [
+            "last 1 chrome version",
+            "last 1 firefox version",
+            "last 1 safari version"
+        ]
+    }
+}
