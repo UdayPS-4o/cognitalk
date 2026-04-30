@@ -1,57 +1,60 @@
 {
-    "name": "video-calling-app",
-    "version": "1.0.0",
-    "description": "Full-featured video calling app with React, WebRTC, and Socket.io",
-    "main": "server.js",
-    "scripts": {
-        "start": "cross-env HTTPS=true HOST=0.0.0.0 react-scripts start",
-        "server": "node server.js",
-        "client": "react-scripts start",
-        "dev": "concurrently \"npm run server\" \"npm run client\"",
-        "build": "react-scripts build",
-        "test": "react-scripts test",
-        "eject": "react-scripts eject"
-    },
-    "keywords": [
-        "webrtc",
-        "video-call",
-        "socket.io",
-        "react"
+  "name": "video-calling-app",
+  "version": "1.0.0",
+  "description": "Full-featured video calling app with React, WebRTC, and Socket.io",
+  "main": "server.js",
+  "scripts": {
+    "start": "node api.js && cross-env HTTPS=true HOST=0.0.0.0 react-scripts start",
+    "start:tunnel": "node api.js && cross-env HTTPS=false HOST=0.0.0.0 react-scripts start",
+    "server": "node server.js",
+    "tunnel": "node scripts/tunnel.js",
+    "dev:tunnel": "node api.js && concurrently \"node server.js\" \"cross-env HTTPS=false HOST=0.0.0.0 react-scripts start\" \"node scripts/tunnel.js\"",
+    "dev": "node api.js && concurrently \"npm run server\" \"npm run start\"",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "keywords": [
+    "webrtc",
+    "video-call",
+    "socket.io",
+    "react"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "framer-motion": "^12.23.12",
+    "lucide-react": "^0.263.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^5.5.0",
+    "react-router-dom": "^7.7.1",
+    "react-scripts": "5.0.1",
+    "recorder-js": "^1.0.7",
+    "selfsigned": "^5.5.0",
+    "socket.io-client": "^4.8.1",
+    "tailwindcss": "^4.1.11"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
+    "express": "^4.18.2",
+    "localtunnel": "^2.0.2",
+    "nodemon": "^3.0.1",
+    "socket.io": "^4.7.2"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
     ],
-    "author": "Your Name",
-    "license": "MIT",
-    "dependencies": {
-        "@heroicons/react": "^2.2.0",
-        "framer-motion": "^12.23.12",
-        "lucide-react": "^0.263.1",
-        "react": "^18.2.0",
-        "react-dom": "^18.2.0",
-        "react-icons": "^5.5.0",
-        "react-router-dom": "^7.7.1",
-        "react-scripts": "5.0.1",
-        "recorder-js": "^1.0.7",
-        "selfsigned": "^5.5.0",
-        "socket.io-client": "^4.8.1",
-        "tailwindcss": "^4.1.11"
-    },
-    "devDependencies": {
-        "concurrently": "^8.2.0",
-        "cors": "^2.8.5",
-        "cross-env": "^7.0.3",
-        "express": "^4.18.2",
-        "nodemon": "^3.0.1",
-        "socket.io": "^4.7.2"
-    },
-    "browserslist": {
-        "production": [
-            ">0.2%",
-            "not dead",
-            "not op_mini all"
-        ],
-        "development": [
-            "last 1 chrome version",
-            "last 1 firefox version",
-            "last 1 safari version"
-        ]
-    }
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
 }
