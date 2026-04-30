@@ -1,0 +1,16 @@
+{
+  "name": "reverse-proxy",
+  "version": "1.0.0",
+  "description": "Full-featured reverse proxy with WebRTC/WebSocket support",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

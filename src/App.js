@@ -19,14 +19,17 @@ const App = () => {
   const [isCallActive, setIsCallActive] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [isConnected, setIsConnected] = useState(false);
   const [participants, setParticipants] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [roomCopied, setRoomCopied] = useState(false);
-  // Chat state
+  const [socketId, setSocketId] = useState(null); // State for current user's socket ID
+  // Chat
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  // Transcripts
+  const [transcripts, setTranscripts] = useState([]);
+
   // Refs
   const localVideoRef = useRef(null);
   const setupVideoRef = useRef(null);
@@ -35,393 +38,282 @@ const App = () => {
   const socketRef = useRef(null);
   const localStreamRef = useRef(null);
 
-  // Languages with flags
+  // --- NEW: Refs for robust audio playback ---
+  const audioQueueRef = useRef([]);
+  const isPlayingAudioRef = useRef(false);
+  const audioObjectRef = useRef(null);
+
+  useEffect(() => {
+    // Create a single, persistent Audio object
+    audioObjectRef.current = new Audio();
+    const audio = audioObjectRef.current;
+    
+    // When one audio clip finishes, try to play the next one
+    const handleAudioEnd = () => {
+      isPlayingAudioRef.current = false;
+      playNextInQueue();
+    };
+    
+    audio.addEventListener('ended', handleAudioEnd);
+
+    // Cleanup function
+    return () => {
+      audio.removeEventListener('ended', handleAudioEnd);
+    };
+  }, []);
+
+
   const languages = [
-    { code: 'en', name: 'English', flag: '🇺🇸' },
-    { code: 'es', name: 'Spanish', flag: '🇪🇸' },
-    { code: 'fr', name: 'French', flag: '🇫🇷' },
-    { code: 'de', name: 'German', flag: '🇩🇪' },
-    { code: 'it', name: 'Italian', flag: '🇮🇹' },
-    { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
-    { code: 'ru', name: 'Russian', flag: '🇷🇺' },
-    { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-    { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
-    { code: 'ko', name: 'Korean', flag: '🇰🇷' },
-    { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
-    { code: 'hi', name: 'Hindi', flag: '🇮🇳' }
+    { code: 'en', name: 'English' },
+    { code: 'es', name: 'Spanish' },
+    { code: 'fr', name: 'French' },
+    { code: 'de', name: 'German' },
+    { code: 'it', name: 'Italian' },
+    { code: 'pt', name: 'Portuguese' },
+    { code: 'ru', name: 'Russian' },
+    { code: 'zh', name: 'Chinese' },
+    { code: 'ja', name: 'Japanese' },
+    { code: 'ko', name: 'Korean' },
+    { code: 'ar', name: 'Arabic' },
+    { code: 'hi', name: 'Hindi' }
   ];
 
   const configuration = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' }
-    ]
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   };
 
-  // Generate room ID when starting call
-  const handleStartCall = () => {
-    if (!roomId) {
-      const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-      setRoomId(randomId);
-    }
-    setCurrentPage('setup');
-  };
-
-  // Initialize media for setup page
-  const initializeSetupMedia = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      if (setupVideoRef.current) {
-        setupVideoRef.current.srcObject = stream;
-        setupVideoRef.current.play();
-      }
-      return stream;
-    } catch (error) {
-      console.error('Error accessing media devices:', error);
-      alert('Unable to access camera/microphone. Please check permissions and try again.');
-    }
-  };
-
-  // Initialize media for call (with constraints)
-  const initializeMedia = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280, max: 1280 },
-          height: { ideal: 720, max: 720 },
-          facingMode: 'user'
-        },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
-      setLocalStream(stream);
-      localStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-        try { await localVideoRef.current.play(); } catch (playError) {
-          console.error('Error playing local video:', playError);
-        }
-      }
-      return stream;
-    } catch (error) {
-      console.error('Error accessing media devices:', error);
-      if (error.name === 'NotAllowedError') {
-        alert('Camera and microphone access denied. Please allow access and refresh the page.');
-      } else if (error.name === 'NotFoundError') {
-        alert('No camera or microphone found. Please check your devices.');
-      } else if (error.name === 'NotReadableError') {
-        alert('Camera or microphone is already in use by another application.');
-      } else {
-        alert('Error accessing camera and microphone: ' + error.message);
-      }
-      throw error;
-    }
-  };
-
+  // Effect for cleaning up connections on component unmount
   useEffect(() => {
-    if (localStream && localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream;
-      localVideoRef.current.play().catch(console.error);
-    }
-  }, [localStream]);
+    return () => {
+      socketRef.current?.disconnect();
+      localStreamRef.current?.getTracks().forEach(track => track.stop());
+      peerConnections.current.forEach(pc => pc.close());
+    };
+  }, []);
 
-  const createPeerConnection = (userId) => {
-    const peerConnection = new RTCPeerConnection(configuration);
+  // --- NEW: Function to play audio from a queue ---
+  const playNextInQueue = () => {
+    if (isPlayingAudioRef.current || audioQueueRef.current.length === 0) {
+      return;
+    }
+    isPlayingAudioRef.current = true;
+    const audioUrl = audioQueueRef.current.shift(); // Get the next URL
+    audioObjectRef.current.src = audioUrl;
+    
+    audioObjectRef.current.play()
+      .then(() => {
+        console.log("Translation audio playback started successfully.");
+      })
+      .catch(error => {
+        console.error("Audio playback failed:", error);
+        // If it fails, we stop trying for this clip and allow the next one.
+        isPlayingAudioRef.current = false; 
+        playNextInQueue();
+      });
+  };
+
+const handleStartCall = (room) => {
+  const newRoom = typeof room === "string"
+    ? room
+    : Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  setRoomId(newRoom);
+  setCurrentPage("setup");
+};
+  const createPeerConnection = (remoteUser) => {
+    const pc = new RTCPeerConnection(configuration);
+    
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStreamRef.current);
+        pc.addTrack(track, localStreamRef.current);
       });
     }
-    peerConnection.addEventListener('icecandidate', (event) => {
-      if (event.candidate && socketRef.current) {
-        socketRef.current.emit('ice-candidate', {
-          candidate: event.candidate,
-          room: roomId,
-          targetId: userId
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        socketRef.current.emit('ice-candidate', { candidate: e.candidate, targetId: remoteUser.id });
+      }
+    };
+
+    pc.ontrack = (e) => {
+      setRemoteStreams(prev => new Map(prev).set(remoteUser.id, e.streams[0]));
+    };
+    
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        setIsCallActive(true);
+        setParticipants(prev => {
+          if (prev.find(p => p.id === remoteUser.id)) return prev;
+          return [...prev, remoteUser];
         });
       }
-    });
-    peerConnection.addEventListener('track', (event) => {
-      const [remoteStream] = event.streams;
-      setRemoteStreams(prev => {
-        const newStreams = new Map(prev);
-        newStreams.set(userId, remoteStream);
-        return newStreams;
-      });
-    });
-    peerConnection.addEventListener('connectionstatechange', () => {
-      if (peerConnection.connectionState === 'connected') {
-        setIsCallActive(true);
-      } else if (
-        peerConnection.connectionState === 'disconnected' ||
-        peerConnection.connectionState === 'failed'
-      ) {
-        handleUserDisconnected(userId);
+      if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+        handleUserDisconnected(remoteUser.id);
       }
-    });
-    return peerConnection;
+    };
+
+    peerConnections.current.set(remoteUser.id, pc);
+    return pc;
   };
 
   const handleUserDisconnected = (userId) => {
-    const peerConnection = peerConnections.current.get(userId);
-    if (peerConnection) {
-      peerConnection.close();
-      peerConnections.current.delete(userId);
-    }
+    peerConnections.current.get(userId)?.close();
+    peerConnections.current.delete(userId);
     setRemoteStreams(prev => {
-      const newStreams = new Map(prev);
-      newStreams.delete(userId);
-      return newStreams;
+      const newMap = new Map(prev);
+      newMap.delete(userId);
+      return newMap;
     });
-    setParticipants(prev => prev.filter(id => id !== userId));
-    if (peerConnections.current.size === 0) {
-      setIsCallActive(false);
-    }
+    setParticipants(prev => prev.filter(p => p.id !== userId));
   };
 
   const joinRoom = async () => {
-    if (!roomId.trim()) {
-      alert('Please enter a room ID');
-      return;
-    }
-    if (!userName.trim()) {
-      alert('Please enter your name');
-      return;
-    }
+    if (!roomId.trim() || !userName.trim()) return;
     
+if (!localStream) {
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     try {
-      setConnectionStatus('connecting');
-      const stream = await initializeMedia();
-      
-      // Connect to socket server
-      socketRef.current = io('http://localhost:5000');
-      
-      socketRef.current.on('connect', () => {
-        console.log('Connected to server');
-        setConnectionStatus('connected');
-        setIsConnected(true);
-      });
-      
-      socketRef.current.on('room-users', users => {
-        console.log('Room users:', users);
-        setParticipants(users);
-      });
-      
-      socketRef.current.on('user-connected', async userId => {
-        console.log('User connected:', userId);
-        setParticipants(prev => [...prev, userId]);
-        const peerConnection = createPeerConnection(userId);
-        peerConnections.current.set(userId, peerConnection);
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        socketRef.current.emit('offer', { offer, room: roomId, targetId: userId });
-      });
-      
-      socketRef.current.on('offer', async data => {
-        console.log('Received offer from:', data.senderId);
-        const peerConnection = createPeerConnection(data.senderId);
-        peerConnections.current.set(data.senderId, peerConnection);
-        await peerConnection.setRemoteDescription(data.offer);
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socketRef.current.emit('answer', { answer, room: roomId, targetId: data.senderId });
-      });
-      
-      socketRef.current.on('answer', async data => {
-        console.log('Received answer from:', data.senderId);
-        const peerConnection = peerConnections.current.get(data.senderId);
-        if (peerConnection) {
-          await peerConnection.setRemoteDescription(data.answer);
-        }
-      });
-      
-      socketRef.current.on('ice-candidate', async data => {
-        const peerConnection = peerConnections.current.get(data.senderId);
-        if (peerConnection) {
-          try {
-            await peerConnection.addIceCandidate(data.candidate);
-          } catch (error) {
-            console.error('Error adding ICE candidate:', error);
-          }
-        }
-      });
-      
-      socketRef.current.on('user-disconnected', userId => {
-        console.log('User disconnected:', userId);
-        handleUserDisconnected(userId);
-      });
-      
-      socketRef.current.on('disconnect', () => {
-        console.log('Disconnected from server');
-        setConnectionStatus('disconnected');
-        setIsConnected(false);
-      });
-
-      socketRef.current.on('connect_error', (error) => {
-        console.error('Connection error:', error);
-        setConnectionStatus('failed');
-      });
-
-      // Join the room
-      socketRef.current.emit('join-room', roomId, userName);
-      setCurrentPage('call');
-      
-    } catch (error) {
-      console.error('Error joining room:', error);
-      setConnectionStatus('failed');
-      alert('Failed to join room. Please check your connection and try again.');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setLocalStream(stream);
+      localStreamRef.current = stream;
+    } catch (err) {
+      console.error("Camera/Mic access denied:", err);
+      alert("Please allow camera and microphone access");
+      return;
     }
+  } else {
+    alert("Camera/Microphone not supported on this device/browser.\nUse laptop or HTTPS.");
+    return;
+  }
+} else {
+  localStreamRef.current = localStream;
+}
+    
+  socketRef.current = io(`https://${window.location.hostname}:5000`);
+  window.socket = socketRef.current;
+
+    socketRef.current.on("connect", () => {
+      // 🎤 Speech Recognition Start
+
+      setConnectionStatus("connected");
+      setSocketId(socketRef.current.id);
+      socketRef.current.emit("join-room", roomId, { userName, language: selectedLanguage });
+      setCurrentPage("call");
+    });
+
+    socketRef.current.on("room-users", async (users) => {
+      setParticipants(users);
+      for (const user of users) {
+        if (peerConnections.current.has(user.id)) continue;
+        const pc = createPeerConnection(user);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socketRef.current.emit("offer", { offer, targetId: user.id });
+      }
+    });
+
+    socketRef.current.on("offer", async ({ offer, senderId }) => {
+      const remoteUser = { id: senderId }; 
+      const pc = createPeerConnection(remoteUser);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socketRef.current.emit("answer", { answer, targetId: senderId });
+    });
+
+    socketRef.current.on("answer", async ({ answer, senderId }) => {
+      const pc = peerConnections.current.get(senderId);
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socketRef.current.on("ice-candidate", async ({ candidate, senderId }) => {
+      const pc = peerConnections.current.get(senderId);
+      if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    // --- FINAL FIX FOR AUDIO PLAYBACK ---
+    socketRef.current.on("new-translation", (data) => {
+      handleNewTranscript({
+  id: crypto.randomUUID(),
+  senderId: "remote",
+  source: data.source_text,
+  translation: data.translated_text,
+});
+      console.log("Received 'new-translation' event:", data);
+
+      if (!data || !data.translated_text || !data.translated_text.trim()) {
+        return;
+      }
+
+
+      // --- Use the new audio queue system ---
+      if (data.audio_url) {
+        audioQueueRef.current.push(`https://${window.location.hostname}:5000${data.audio_url}`);
+        playNextInQueue();
+      }
+    });
+
+    socketRef.current.on("chat-message", (msg) => {
+      setChatMessages(prev => [...prev, msg]);
+    });
+
+    socketRef.current.on("user-disconnected", (id) => {
+      handleUserDisconnected(id);
+    });
   };
 
-  const copyRoomId = async () => {
-    try {
-      await navigator.clipboard.writeText(roomId);
-      setRoomCopied(true);
-      setTimeout(() => setRoomCopied(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy room ID:', error);
-      // Fallback for browsers that don't support clipboard API
-      const textArea = document.createElement('textarea');
-      textArea.value = roomId;
-      document.body.appendChild(textArea);
-      textArea.select();
-      try {
-        document.execCommand('copy');
-        setRoomCopied(true);
-        setTimeout(() => setRoomCopied(false), 2000);
-      } catch (fallbackError) {
-        console.error('Fallback copy failed:', fallbackError);
-        alert('Failed to copy room ID. Please copy it manually: ' + roomId);
-      }
-      document.body.removeChild(textArea);
-    }
+  const handleNewTranscript = (msg) => {
+    setTranscripts(prev => [...prev, msg]);
+  };
+
+  const copyRoomId = () => {
+    navigator.clipboard.writeText(roomId);
+    setRoomCopied(true);
+    setTimeout(() => setRoomCopied(false), 2000);
   };
 
   const leaveRoom = () => {
-    console.log('Leaving room...');
-    
-    // Stop local media tracks
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        track.stop();
-      });
-    }
-    
-    // Close all peer connections
-    peerConnections.current.forEach(peerConnection => {
-      peerConnection.close();
-    });
+    socketRef.current?.disconnect();
+    peerConnections.current.forEach(pc => pc.close());
     peerConnections.current.clear();
-    
-    // Disconnect from socket
-    if (socketRef.current) {
-      socketRef.current.emit('leave-room', roomId);
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
-    
-    // Clear video elements
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-    
-    // Reset states
+    localStreamRef.current?.getTracks().forEach(track => track.stop());
     setLocalStream(null);
     setRemoteStreams(new Map());
-    setIsConnected(false);
-    setIsCallActive(false);
     setParticipants([]);
-    setConnectionStatus('disconnected');
+    setCurrentPage("home");
+    setIsCallActive(false);
+    setConnectionStatus("disconnected");
     setChatMessages([]);
-    setNewMessage('');
-    setIsChatOpen(false);
-    localStreamRef.current = null;
-    
-    // Navigate back to home
-    setCurrentPage('home');
+    setTranscripts([]);
   };
 
   const toggleVideo = () => {
-    if (localStreamRef.current) {
-      const videoTrack = localStreamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsVideoEnabled(videoTrack.enabled);
-      }
-    }
+    localStreamRef.current.getVideoTracks().forEach(track => {
+      track.enabled = !track.enabled;
+      setIsVideoEnabled(track.enabled);
+    });
   };
 
   const toggleAudio = () => {
-    if (localStreamRef.current) {
-      const audioTrack = localStreamRef.current.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsAudioEnabled(audioTrack.enabled);
-      }
-    }
+    localStreamRef.current.getAudioTracks().forEach(track => {
+      track.enabled = !track.enabled;
+      setIsAudioEnabled(track.enabled);
+    });
   };
 
   const sendMessage = () => {
-    if (newMessage.trim()) {
-      const message = {
-        id: Date.now(),
-        text: newMessage,
-        sender: userName || 'You',
-        timestamp: new Date().toLocaleTimeString()
-      };
-      setChatMessages(prev => [...prev, message]);
-      setNewMessage('');
-      
-      // Emit message to other participants via socket if connected
-      if (socketRef.current && isConnected) {
-        socketRef.current.emit('chat-message', {
-          room: roomId,
-          message: message
-        });
-      }
-    }
+    if (!newMessage.trim()) return;
+    const msg = { id: Date.now(), sender: userName, text: newMessage, timestamp: new Date().toLocaleTimeString() };
+    socketRef.current.emit("chat-message", msg);
+    setChatMessages(prev => [...prev, msg]);
+    setNewMessage("");
   };
 
-  // Initialize setup media when entering setup page
-  useEffect(() => {
-    if (currentPage === 'setup') {
-      initializeSetupMedia();
-    }
-    
-    // Cleanup function
-    return () => {
-      // Only cleanup if we're unmounting the entire app
-      if (currentPage === 'setup' || currentPage === 'call') {
-        // Don't automatically leave room on component updates
-      }
-    };
-  }, [currentPage]);
-
-  // Socket event listeners for chat
-  useEffect(() => {
-    if (socketRef.current) {
-      socketRef.current.on('chat-message', (data) => {
-        setChatMessages(prev => [...prev, data.message]);
-      });
-
-      return () => {
-        if (socketRef.current) {
-          socketRef.current.off('chat-message');
-        }
-      };
-    }
-  }, [socketRef.current]);
-
-  // Render Routes
-  if (currentPage === 'home') {
-    return (
-      <HomePage
-        onStartCall={handleStartCall}
-      />
-    );
+  if (currentPage === "home") {
+    return <HomePage onStartCall={handleStartCall} />;
   }
-  
-  if (currentPage === 'setup') {
+
+  if (currentPage === "setup") {
     return (
       <SetupPage
         userName={userName}
@@ -430,25 +322,26 @@ const App = () => {
         setSelectedLanguage={setSelectedLanguage}
         languages={languages}
         setupVideoEnabled={setupVideoEnabled}
-        setupAudioEnabled={setupAudioEnabled}
         setSetupVideoEnabled={setSetupVideoEnabled}
+        setupAudioEnabled={setupAudioEnabled}
         setSetupAudioEnabled={setSetupAudioEnabled}
         setupVideoRef={setupVideoRef}
         roomId={roomId}
-        setRoomId={setRoomId} // Added this missing prop
+        setRoomId={setRoomId}
         copyRoomId={copyRoomId}
         roomCopied={roomCopied}
         onJoin={joinRoom}
-        onBack={() => setCurrentPage('home')}
+        onBack={() => setCurrentPage("home")}
+        setLocalStream={setLocalStream}
       />
     );
   }
-  
-  // Video Call Page
+
   return (
     <VideoCallPage
       userName={userName}
       roomId={roomId}
+      socketId={socketId}
       localStream={localStream}
       localVideoRef={localVideoRef}
       remoteStreams={remoteStreams}
@@ -467,8 +360,12 @@ const App = () => {
       setNewMessage={setNewMessage}
       sendMessage={sendMessage}
       connectionStatus={connectionStatus}
+      selectedLanguage={selectedLanguage}
+      onNewTranscript={handleNewTranscript}
+      transcripts={transcripts}
     />
   );
 };
 
 export default App;
+

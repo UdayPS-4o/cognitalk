@@ -16,7 +16,7 @@ export default function Logo({ size = 40 }) {
         <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-400 rounded-full animate-pulse"></div>
       </div>
       <span className="font-bold text-2xl bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
-        GlobalTalk
+        CogniTalk
       </span>
     </motion.div>
   );
